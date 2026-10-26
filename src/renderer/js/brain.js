@@ -155,7 +155,11 @@ export class Brain {
   // Mid-task and nothing from Claude for a while: it's thinking (a big question, a slow local
   // model). The ticker counts the seconds and she keeps herself busy, so you can tell nothing froze.
   watchThinking() {
-    if (!this.thinkTimer) this.thinkTimer = setInterval(() => this.thinkTick(), 1000);
+    if (!this.thinkTimer) {
+      this.thinkTimer = setInterval(() => this.thinkTick(), 1000);
+      // Node's test runner should not stay open for an idle browser animation timer.
+      this.thinkTimer?.unref?.();
+    }
   }
 
   thinkTick() {
