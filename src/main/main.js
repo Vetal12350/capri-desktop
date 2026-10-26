@@ -15,6 +15,8 @@ const { startWindowWatch } = require('./windows');
 const ollama = require('./ollama');
 const apps = require('./apps');
 const hooks = require('../../scripts/install-hooks');
+const codexHooks = require('../../scripts/install-codex-hooks');
+const { createSessionMonitor } = require('./codex-session-monitor');
 const demoSteps = require('../../scripts/demo-sequence');
 
 const ROOT = path.resolve(__dirname, '..', '..');
@@ -33,6 +35,8 @@ let tray = null;
 let trayMenu = null; // also what she opens when you right-click her
 let demoTimer = null;
 let windowWatch = null;
+let codexSessionMonitor = null;
+const hookSessions = new Map(); // suppress rollout duplicates when live Codex hooks work
 // the watcher only speaks when something changes: the overlay asks for this when it (re)loads
 let lastWindows = null;
 let chatModels = null; // the Ollama models, as last seen (null: Ollama not reached)
@@ -203,6 +207,7 @@ function rebuildTray() {
   if (!tray) return;
   const cfg = config.load();
   const hookState = hooks.status();
+  const codexHookState = codexHooks.status();
   const t = TRAY[resolveLang(cfg.lang)];
 
   const displays = screen.getAllDisplays();
@@ -266,6 +271,7 @@ function rebuildTray() {
       })),
     },
     { label: t.claude, type: 'checkbox', checked: cfg.claude, click: (item) => updateConfig({ claude: item.checked }) },
+    { label: t.codex, type: 'checkbox', checked: cfg.codex !== false, click: (item) => updateConfig({ codex: item.checked }) },
     {
       label: t.motion,
       submenu: [['auto', t.motionAuto], ['full', t.motionFull], ['reduced', t.motionReduced]].map(([motion, label]) => ({
@@ -292,6 +298,11 @@ function rebuildTray() {
         : { label: t.hooksOff, click: () => runHooks('install') },
       ...(hookState.installed ? [{ label: t.hooksRemove, click: () => runHooks('uninstall') }] : []),
     ] : []),
+    // Codex can be connected independently of Claude, even if the welcome guide is Claude-specific.
+    codexHookState.installed
+      ? { label: t.codexOn, enabled: false }
+      : { label: t.codexOff, click: () => runCodexHooks('install') },
+    ...(codexHookState.events.length ? [{ label: t.codexRemove, click: () => runCodexHooks('uninstall') }] : []),
     { type: 'separator' },
     { label: t.quit, click: () => app.quit() },
   ]);
@@ -317,6 +328,17 @@ function runHooks(action, { quiet = false } = {}) {
   if (!quiet) sendCommand('hooks', outcome);
   rebuildTray();
   return outcome;
+}
+
+// Codex hook configuration is separate from Claude's settings.
+function runCodexHooks(action) {
+  try {
+    const result = action === 'install' ? codexHooks.install() : codexHooks.uninstall();
+    sendCommand('hooks', { action, provider: 'codex', ok: true, file: result.file });
+  } catch (err) {
+    sendCommand('hooks', { action, provider: 'codex', ok: false, error: err.message });
+  }
+  rebuildTray();
 }
 
 // The model she talks with: the one picked in her menu if it's still installed, else the first.
@@ -349,7 +371,7 @@ function registerIpc() {
     return { x: p.x - b.x, y: p.y - b.y, inside: p.x >= b.x && p.y >= b.y && p.x < b.x + b.width && p.y < b.y + b.height };
   });
   ipcMain.handle('config:get', () => rendererConfig());
-  ipcMain.handle('hooks:status', () => hooks.status());
+  ipcMain.handle('hooks:status', () => ({ ...hooks.status(), codex: codexHooks.status() }));
   ipcMain.handle('config:set', (_e, patch) => updateConfig(patch));
   ipcMain.handle('demo:window', (_e, open) => demoWindow(open));
   // right-clicking her: the same menu as the tray icon (which Windows often hides behind the ^ by the clock)
@@ -529,9 +551,23 @@ function main() {
     });
     createBridge({
       port: PORT,
-      onEvent: (evt) => overlay?.webContents.send('claude:event', evt),
+      onEvent: (evt) => {
+        if (evt.provider === 'codex' && evt.session_id) hookSessions.set(evt.session_id, Date.now());
+        overlay?.webContents.send('claude:event', evt);
+      },
       onDebug: DEV ? debugHandler : null,
     });
+    // Codex Desktop on Windows can skip hooks even when installed and trusted.
+    // Observe only the local Codex Desktop session journal, without modifying its files.
+    codexSessionMonitor = createSessionMonitor({
+      onEvent: (evt) => {
+        // Prefer live hooks, never replay one session through both transports.
+        if (Date.now() - (hookSessions.get(evt.session_id) || 0) < 10 * 60 * 1000) return;
+        if (config.load().codex === false) return;
+        overlay?.webContents.send('claude:event', evt);
+      },
+    });
+    codexSessionMonitor.start().catch((err) => console.warn('[capri] Codex sessions monitor unavailable:', err.message));
     globalShortcut.register('Control+Alt+C', () => toggleVisible());
     refreshModels(); // for her menu's model list
     screen.on('display-metrics-changed', fitOverlay);
@@ -542,6 +578,7 @@ function main() {
   app.on('will-quit', () => {
     globalShortcut.unregisterAll();
     windowWatch?.stop();
+    codexSessionMonitor?.stop();
   });
   app.on('window-all-closed', (e) => e.preventDefault());
 }

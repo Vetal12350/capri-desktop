@@ -1,10 +1,10 @@
-// Turns Claude Code hook events into things Capri says and does.
+// Turns coding-agent hook events into things Capri says and does.
 
 import { LINES } from './lines.js';
 import { pick, fmt, duration, basename, rand } from './util.js';
 
-const EDIT_TOOLS = new Set(['Write', 'Edit', 'MultiEdit', 'NotebookEdit']);
-const HACKING_TOOLS = new Set(['Bash', 'PowerShell', 'WebFetch', 'WebSearch', 'Agent', 'Task']);
+const EDIT_TOOLS = new Set(['Write', 'Edit', 'MultiEdit', 'NotebookEdit', 'apply_patch']);
+const HACKING_TOOLS = new Set(['Bash', 'PowerShell', 'WebFetch', 'WebSearch', 'Agent', 'Task', 'exec_command']);
 const WORKING_EVERY = 20; // say something about progress every N tool calls
 const LONG_JOB_MS = 8 * 60 * 1000; // a job this long (or this busy) earns the whole satellite sequence
 const LONG_JOB_ACTIONS = 50;
@@ -28,7 +28,8 @@ export class Brain {
     this.onLinked = null;
     this.onShowcase = null; // the demo's second half (app.js)
     this.onTalk = null;     // opens a chat with her (app.js, chat.js)
-    this.watching = true;   // she follows Claude Code (her menu; off, she just keeps you company)
+    this.watching = true;   // follows Claude Code
+    this.watchingCodex = true; // follows local Codex separately
     this.thinkTimer = 0;
     this.thinking = null;   // { s, since, said, fidget, gazed } while Claude is quiet mid-task
   }
@@ -38,10 +39,12 @@ export class Brain {
   }
 
   session(evt) {
-    const id = evt.session_id || 'default';
+    const provider = evt.provider === 'codex' ? 'codex' : 'claude';
+    const id = `${provider}:${evt.session_id || 'default'}`;
     let s = this.sessions.get(id);
     if (!s) {
-      s = { id, project: 'Claude', taskStart: null, count: 0, files: new Set(), log: [], working: false, waiting: false };
+      const assistant = provider === 'codex' ? 'Codex' : 'Claude';
+      s = { id, assistant, project: assistant, taskStart: null, count: 0, files: new Set(), log: [], working: false, waiting: false, endedTurns: new Set() };
       this.sessions.set(id, s);
     }
     if (evt.cwd) s.project = basename(evt.cwd);
@@ -55,7 +58,29 @@ export class Brain {
   }
 
   say(kind, line, s, extra = {}) {
-    return this.panel.say({ kind, line, tag: s ? s.title || s.project : '', ...extra });
+    return this.panel.say({ kind, line: String(line).replace(/\{assistant\}/g, s?.assistant || 'Claude'), tag: s ? s.title || s.project : '', sessionId: s?.id, ...extra });
+  }
+
+  // Ignore late events from completed turns and keep Claude and Codex sessions separate.
+  acceptTurn(evt, s) {
+    if (evt.provider !== 'codex' || !evt.turn_id) return true;
+    const turn = evt.turn_id;
+    if (s.endedTurns.has(turn)) return false;
+    if (s.turnId !== turn) {
+      if (s.turnId && !s.endedTurns.has(s.turnId) && evt.hook_event_name !== 'UserPromptSubmit') {
+        if (evt.hook_event_name === 'Stop' || evt.hook_event_name === 'Interrupt') s.endedTurns.add(turn);
+        return false;
+      }
+      if (s.turnId) s.endedTurns.add(s.turnId);
+      Object.assign(s, { turnId: turn, promptSeen: false, taskStart: null, count: 0, files: new Set(), log: [], working: false });
+    }
+    if (evt.hook_event_name === 'UserPromptSubmit') {
+      if (s.promptSeen) return false;
+      s.promptSeen = true;
+    }
+    if (evt.hook_event_name === 'Stop' || evt.hook_event_name === 'Interrupt') s.endedTurns.add(turn);
+    while (s.endedTurns.size > 32) s.endedTurns.delete(s.endedTurns.values().next().value);
+    return true;
   }
 
   // today's log, for real events only: the demo's don't go on her report card
@@ -66,7 +91,8 @@ export class Brain {
   handle(evt) {
     // the demo's second half (scripts/demo-sequence.js), not a Claude event
     if (evt.hook_event_name === 'CapriShowcase') return this.onShowcase?.();
-    if (!this.watching && !evt.demo) return undefined; // not watching Claude Code: none of its business
+    if (!evt.demo && evt.provider === 'codex' && !this.watchingCodex) return undefined;
+    if (!evt.demo && evt.provider !== 'codex' && !this.watching) return undefined;
     // the first real Claude Code event that ever reaches her (the demo's don't count)
     if (!this.linked && !evt.demo) {
       this.linked = true;
@@ -74,14 +100,17 @@ export class Brain {
     }
     const s = this.session(evt);
     const name = evt.hook_event_name;
+    if (!this.acceptTurn(evt, s)) return;
     // these three put her somewhere themselves; anything else just brings her out of hiding
     if (name === 'UserPromptSubmit' || name === 'Stop' || name === 'Notification') this.capri.wake();
     else this.capri.attend();
 
-    // anything happening after a permission prompt means it was answered
-    if (s.waiting && name !== 'Notification') {
+    // Codex async tool events can arrive out of order; only the matching result clears an approval.
+    const codexResumed = ['UserPromptSubmit', 'Stop', 'StopFailure', 'Interrupt', 'SessionEnd'].includes(name)
+      || (['PostToolUse', 'PostToolUseFailure'].includes(name) && this.approvalKey(evt) === s.waitingFor);
+    if (s.waiting && name !== 'Notification' && (evt.provider !== 'codex' || codexResumed)) {
       s.waiting = false;
-      this.panel.clearKind('alert');
+      if (this.panel.current?.sessionId === s.id) this.panel.clearKind('alert');
       if (s.pointedAt) this.capri.stopPointing(); // she was showing you Claude's window
       s.pointedAt = false;
       if (this.capri.mode === 'alert') this.capri.setMode(s.working ? 'work' : 'idle');
@@ -95,6 +124,7 @@ export class Brain {
       case 'Notification': return this.onNotification(evt, s);
       case 'Stop': return this.onStop(evt, s);
       case 'StopFailure': return this.onStopFailure(evt, s);
+      case 'Interrupt': return this.onInterrupt(evt, s);
       case 'SubagentStart': return this.onSubagent(evt, s, true);
       case 'SubagentStop': return this.onSubagent(evt, s, false);
       case 'PreCompact': return this.say('info', pick(this.t.compact), s, { face: 'aside', hold: 4000 });
@@ -114,7 +144,9 @@ export class Brain {
   onPrompt(evt, s) {
     // the window in front when you send a prompt is the one you typed it in: Claude's
     const window = this.capri.windows.fg || null;
-    Object.assign(s, { taskStart: Date.now(), count: 0, files: new Set(), log: [], working: true, window });
+    const earlyTools = evt.provider === 'codex' && evt.turn_id && s.count > 0;
+    if (!earlyTools) Object.assign(s, { count: 0, files: new Set(), log: [] });
+    Object.assign(s, { taskStart: Date.now(), working: true, window });
     this.tally(evt)?.prompt(s.project);
     this.capri.goToWork(); // perched on the window in front if she can, else her corner
     const prompt = String(evt.prompt || '').replace(/\s+/g, ' ').trim();
@@ -125,7 +157,11 @@ export class Brain {
   // Mid-task and nothing from Claude for a while: it's thinking (a big question, a slow local
   // model). The ticker counts the seconds and she keeps herself busy, so you can tell nothing froze.
   watchThinking() {
-    if (!this.thinkTimer) this.thinkTimer = setInterval(() => this.thinkTick(), 1000);
+    if (!this.thinkTimer) {
+      this.thinkTimer = setInterval(() => this.thinkTick(), 1000);
+      // Node's test runner should not stay open for an idle browser animation timer.
+      this.thinkTimer?.unref?.();
+    }
   }
 
   thinkTick() {
@@ -178,6 +214,9 @@ export class Brain {
     if (EDIT_TOOLS.has(evt.tool_name)) {
       const file = evt.tool_input?.file_path || evt.tool_input?.notebook_path;
       if (file) s.files.add(file);
+      if (evt.tool_name === 'apply_patch') {
+        for (const name of evt.tool_input?.files || []) if (typeof name === 'string') s.files.add(name);
+      }
     }
     if (this.capri.mode !== 'alert') this.capri.setMode('work');
     this.capri.pulse();
@@ -213,6 +252,7 @@ export class Brain {
     const type = evt.notification_type;
     if (type === 'permission_prompt' || type === 'elicitation_dialog' || type === 'agent_needs_input') {
       s.waiting = true;
+      s.waitingFor = this.approvalKey(evt);
       this.tally(evt)?.approval();
       this.capri.setMode('alert');
       this.voice.play('alert');
@@ -240,7 +280,13 @@ export class Brain {
     if (evt.message) this.say('info', evt.message, s, { hold: 5000 });
   }
 
+  approvalKey(evt) {
+    const input = evt.tool_input || {};
+    return JSON.stringify([evt.tool_name, input.command || input.files || input.path || input.file_path || '']);
+  }
+
   async onStop(evt, s) {
+    const current = () => !evt.turn_id || s.turnId === evt.turn_id;
     const wasWorking = s.working;
     s.working = false;
     const { units } = this.t;
@@ -262,6 +308,7 @@ export class Brain {
     // and holds it up until you're back on Claude's window or click it away.
     const reply = this.away(s) ? readable(evt.last_assistant_message || '') : '';
     const done = (extra) => {
+      if (!current()) return;
       if (reply) this.replyFor = s;
       if (reply) this.say('done', pick(this.t.reply), s, { ...extra, reply, hold: null });
       else this.say('done', pick(this.t.done), s, { ...extra, quote: clip(quote, 150) });
@@ -276,6 +323,7 @@ export class Brain {
     // quick back-and-forth answers don't deserve the whole show
     const bigJob = s.count >= 3 || (s.taskStart && Date.now() - s.taskStart > 20000);
     if (bigJob) await this.capri.teleport(this.capri.spot('stage'));
+    if (!current()) return;
     // the panel comes in once she's back down from her victory pose
     this.capri.celebrate({ onSpeak: () => done({ summary, hold: 14000 }) });
     // a long one: she'll send the red light up to the satellite once it's all quiet
@@ -309,6 +357,23 @@ export class Brain {
     this.say('error', pick(this.t.crashed), s, { face: 'wide', quote: clip(String(detail), 120), hold: 9000 });
   }
 
+  onInterrupt(_evt, s) {
+    s.working = false;
+    s.waiting = false;
+    if (this.panel.current?.sessionId === s.id) this.panel.clearKind('alert');
+    if (s.pointedAt) this.capri.stopPointing();
+    s.pointedAt = false;
+    if ([...this.sessions.values()].some((session) => session.waiting)) {
+      this.capri.setMode('alert');
+      return;
+    }
+    if (!this.busySessions.length) {
+      this.panel.setTicker(null);
+      this.capri.setMode('idle');
+    }
+    this.say('info', pick(this.t.interrupted), s, { hold: 4000 });
+  }
+
   onSubagent(evt, s, starting) {
     const agent = evt.agent_type || this.t.someAgent;
     const line = fmt(pick(starting ? this.t.subagentStart : this.t.subagentStop), { agent });
@@ -337,7 +402,7 @@ export class Brain {
     const s = busy.sort((a, b) => b.seen - a.seen)[0];
     const time = s.taskStart ? duration(Date.now() - s.taskStart, this.lang) : '…';
     const extra = busy.length > 1 ? ` ${fmt(this.t.sessions, { count: busy.length })}.` : '';
-    this.say('work', fmt(this.t.status, { project: s.project, time }) + extra, s, { log: s.log, hold: 6000 });
+    this.say('work', fmt(this.t.status, { project: s.project, time, assistant: s.assistant }) + extra, s, { log: s.log, hold: 6000 });
   }
 
   // What's going on, in plain words, for her chat: so she can answer "what's Claude up to?".
@@ -347,9 +412,9 @@ export class Brain {
       ? busy.map((s) => {
         const time = s.taskStart ? ` for ${duration(Date.now() - s.taskStart, 'en')}` : '';
         const last = s.last ? `, last: ${s.last.verb} ${s.last.target}` : '';
-        return `Claude is working on ${s.project}${time} (${plural(s.count, ['action', 'actions'], 'en')} so far${last}).`;
+        return `${s.assistant} is working on ${s.project}${time} (${plural(s.count, ['action', 'actions'], 'en')} so far${last}).`;
       }).join(' ')
-      : 'Claude is idle.';
+      : 'No coding agent is active.';
     const d = this.mission?.day;
     const today = d ? ` Today: ${d.missions} tasks finished, ${d.actions} actions, ${d.files} files changed, ${d.errors} errors.` : '';
     return now + today;
@@ -403,9 +468,11 @@ export class Brain {
     switch (name) {
       case 'Read': case 'Write': case 'Edit': case 'MultiEdit':
         target = basename(input.file_path); break;
+      case 'apply_patch':
+        target = (input.files || []).map((file) => basename(file)).join(', '); break;
       case 'NotebookEdit':
         target = basename(input.notebook_path); break;
-      case 'Bash': case 'PowerShell':
+      case 'Bash': case 'PowerShell': case 'exec_command':
         target = input.description || input.command; break;
       case 'Grep':
         target = input.pattern ? `“${input.pattern}”` : ''; break;

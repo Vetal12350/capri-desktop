@@ -3,7 +3,7 @@
 # Capri
 
 Capri, the *Project Capricorn* construct from Cyberpunk: Edgerunners season 2, lives on your desktop
-and tells you what **Claude Code** is up to. She teleports, glitches, comments on every action,
+and tells you what **Claude Code or local Codex** is up to. She teleports, glitches, comments on every action,
 comes to find you when Claude needs your permission, and loses it when the job is done.
 
 ![Capri telling you Claude is done](docs/done.png)
@@ -367,3 +367,51 @@ the show, a fan-made cut-out and fan art (her intro's close-ups); they are **not
 If a rights holder wants them removed, open an issue.
 
 Fonts: Chakra Petch and JetBrains Mono, under the SIL Open Font License, via Fontsource.
+
+## Local OpenAI Codex integration (experimental fork)
+
+This fork retains the current Capri animations and Claude support and adds an experimental
+**local Codex CLI** adapter based on the draft upstream
+[Codex integration PR #2](https://github.com/mochiiwuff/capri-desktop/pull/2).
+Cloud Codex tasks in the browser / GitHub are **not** tracked.
+
+1. Install the desktop app from the unsigned build artifact, or run `npm ci && npm start`.
+2. Start Capri. Right-click Capri or her tray icon → **Install Codex hooks**.
+   Alternatively, run `npm run hooks:codex:install`.
+3. Start a **new local Codex CLI session**, review the hooks with `/hooks`, and explicitly
+   trust only the hooks you recognize. Don't change Codex's normal approval policy.
+4. Run a prompt and check activity, edits, approval prompts, failures and completion.
+5. Disable via **Remove Codex hooks** or `npm run hooks:codex:uninstall`.
+   Installation preserves unrelated hooks and makes a backup when settings change.
+
+The hook installer respects `CODEX_HOME` and modifies the local `hooks.json`.
+No API key is needed just for Capri. CLI hook availability depends on your installed Codex version.
+Hooks forward display metadata over `127.0.0.1`; they do not transmit source patches.
+Before using a build, review changes and scan the unsigned installer.
+See [testing instructions](CODEX_TEST_PLAN.md).
+
+The source code is MIT, but the original character artwork is **excluded** from that license.
+This is a personal, noncommercial experiment: the copyrighted art must not be relicensed.
+
+## Codex Desktop on Windows: read-only session monitor fallback
+
+The lifecycle hook toggle alone does not guarantee that Desktop will dispatch hooks
+or trust them; see upstream Codex reports [#21639](https://github.com/openai/codex/issues/21639)
+and [#47283](https://github.com/openai/codex/issues/47283).
+
+This fork offers a second **Watch Codex** checkbox independent from **Watch Claude Code**.
+When enabled, Capri also watches `%USERPROFILE%\\.codex\\sessions\\YYYY\\MM\\DD\\rollout-*.jsonl`
+(or `CODEX_HOME/sessions`) for **newly appended Codex Desktop activity**. It:
+- reads local files **read-only**, never changes Codex settings, files, prompts, or projects;
+- processes recent Desktop sessions, and does not replay history when Capri starts;
+- forwards only lifecycle **event names** and **tool names** to the local overlay, without
+  copying prompt text, shell commands, code, patch contents or response text;
+- suppresses duplicate updates if matching live Codex CLI hooks already work.
+
+The journal format is unofficial, so it may change with Codex updates. This mode currently
+supports prompt/start, basic tool activity, completion and interruption. It cannot guarantee
+permission prompts, full final answers, or every tool action. If the app itself does not
+create local journal files, the fallback won't see it.
+
+For testing, enable **Watch Codex** even when **Watch Claude Code** is off. Run a
+**new local** Desktop turn after Capri is already open. Remote/cloud tasks are not covered.

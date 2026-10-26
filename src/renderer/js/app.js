@@ -83,6 +83,7 @@ async function boot() {
 
   const mission = new Mission();
   const brain = new Brain({ capri, panel, voice, host, mission, lang: config.lang });
+  brain.watchingCodex = config.codex !== false;
 
   // Click-through everywhere except on her body, the panel and her biochip.
   let interactive = false;
@@ -296,13 +297,18 @@ async function boot() {
     capri.possessWindows = cfg.possess;
     capri.restOn = cfg.rest || 'corner';
     applyMotion(cfg.motion);
+    if (cfg.codex === false && brain.watchingCodex) {
+      for (const key of [...brain.sessions.keys()]) if (key.startsWith('codex:')) brain.sessions.delete(key);
+    }
     if (cfg.claude === false && brain.watching) {
-      // no longer watching Claude Code: whatever it was in the middle of is no business of hers
-      brain.sessions.clear();
-      panel.setTicker(null);
-      if (capri.mode === 'work' || capri.mode === 'alert') capri.setMode('idle');
+      for (const key of [...brain.sessions.keys()]) if (key.startsWith('claude:')) brain.sessions.delete(key);
     }
     brain.watching = cfg.claude !== false;
+    brain.watchingCodex = cfg.codex !== false;
+    if (!brain.busySessions.length && capri.mode === 'work') {
+      panel.setTicker(null);
+      capri.setMode('idle');
+    }
     if (cfg.scale !== capri.scale) capri.setScale(cfg.scale);
     if (cfg.lang !== brain.lang) {
       brain.lang = cfg.lang;
