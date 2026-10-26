@@ -15,6 +15,7 @@ const { startWindowWatch } = require('./windows');
 const ollama = require('./ollama');
 const apps = require('./apps');
 const hooks = require('../../scripts/install-hooks');
+const codexHooks = require('../../scripts/install-codex-hooks');
 const demoSteps = require('../../scripts/demo-sequence');
 
 const ROOT = path.resolve(__dirname, '..', '..');
@@ -203,6 +204,7 @@ function rebuildTray() {
   if (!tray) return;
   const cfg = config.load();
   const hookState = hooks.status();
+  const codexHookState = codexHooks.status();
   const t = TRAY[resolveLang(cfg.lang)];
 
   const displays = screen.getAllDisplays();
@@ -292,6 +294,11 @@ function rebuildTray() {
         : { label: t.hooksOff, click: () => runHooks('install') },
       ...(hookState.installed ? [{ label: t.hooksRemove, click: () => runHooks('uninstall') }] : []),
     ] : []),
+    // Codex can be connected independently of Claude, even if the welcome guide is Claude-specific.
+    codexHookState.installed
+      ? { label: t.codexOn, enabled: false }
+      : { label: t.codexOff, click: () => runCodexHooks('install') },
+    ...(codexHookState.events.length ? [{ label: t.codexRemove, click: () => runCodexHooks('uninstall') }] : []),
     { type: 'separator' },
     { label: t.quit, click: () => app.quit() },
   ]);
@@ -317,6 +324,17 @@ function runHooks(action, { quiet = false } = {}) {
   if (!quiet) sendCommand('hooks', outcome);
   rebuildTray();
   return outcome;
+}
+
+// Codex hook configuration is separate from Claude's settings.
+function runCodexHooks(action) {
+  try {
+    const result = action === 'install' ? codexHooks.install() : codexHooks.uninstall();
+    sendCommand('hooks', { action, provider: 'codex', ok: true, file: result.file });
+  } catch (err) {
+    sendCommand('hooks', { action, provider: 'codex', ok: false, error: err.message });
+  }
+  rebuildTray();
 }
 
 // The model she talks with: the one picked in her menu if it's still installed, else the first.
@@ -349,7 +367,7 @@ function registerIpc() {
     return { x: p.x - b.x, y: p.y - b.y, inside: p.x >= b.x && p.y >= b.y && p.x < b.x + b.width && p.y < b.y + b.height };
   });
   ipcMain.handle('config:get', () => rendererConfig());
-  ipcMain.handle('hooks:status', () => hooks.status());
+  ipcMain.handle('hooks:status', () => ({ ...hooks.status(), codex: codexHooks.status() }));
   ipcMain.handle('config:set', (_e, patch) => updateConfig(patch));
   ipcMain.handle('demo:window', (_e, open) => demoWindow(open));
   // right-clicking her: the same menu as the tray icon (which Windows often hides behind the ^ by the clock)

@@ -16,6 +16,7 @@ const TRAY = {
     soundsDir: 'Ouvrir le dossier des sons perso', screen: 'Écran', wander: 'Se balader quand rien ne se passe',
     possess: 'Posséder mes fenêtres', lang: 'Langue', auto: 'Automatique (système)', startup: 'Lancer au démarrage',
     hooksOn: 'Hooks Claude Code : installés', hooksOff: 'Installer les hooks Claude Code',
+    codexOn: 'Hooks Codex : installés', codexOff: 'Installer les hooks Codex', codexRemove: 'Retirer les hooks Codex',
     hooksRemove: 'Retirer les hooks Claude Code', quit: 'Quitter',
   },
   en: {
@@ -30,6 +31,7 @@ const TRAY = {
     soundsDir: 'Open custom sounds folder', screen: 'Screen', wander: 'Wander around when idle',
     possess: 'Possess my windows', lang: 'Language', auto: 'Automatic (system)', startup: 'Start with Windows',
     hooksOn: 'Claude Code hooks: installed', hooksOff: 'Install Claude Code hooks',
+    codexOn: 'Codex hooks: installed', codexOff: 'Install Codex hooks', codexRemove: 'Remove Codex hooks',
     hooksRemove: 'Remove Claude Code hooks', quit: 'Quit',
   },
   es: {
@@ -44,6 +46,7 @@ const TRAY = {
     soundsDir: 'Abrir la carpeta de sonidos propios', screen: 'Pantalla', wander: 'Pasear cuando no pasa nada',
     possess: 'Poseer mis ventanas', lang: 'Idioma', auto: 'Automático (sistema)', startup: 'Iniciar con Windows',
     hooksOn: 'Hooks de Claude Code: instalados', hooksOff: 'Instalar los hooks de Claude Code',
+    codexOn: 'Hooks de Codex: instalados', codexOff: 'Instalar los hooks de Codex', codexRemove: 'Quitar los hooks de Codex',
     hooksRemove: 'Quitar los hooks de Claude Code', quit: 'Salir',
   },
   pt: {
@@ -58,6 +61,7 @@ const TRAY = {
     soundsDir: 'Abrir a pasta de sons personalizados', screen: 'Tela', wander: 'Passear quando nada acontece',
     possess: 'Possuir minhas janelas', lang: 'Idioma', auto: 'Automático (sistema)', startup: 'Iniciar com o Windows',
     hooksOn: 'Hooks do Claude Code: instalados', hooksOff: 'Instalar os hooks do Claude Code',
+    codexOn: 'Hooks do Codex: instalados', codexOff: 'Instalar hooks do Codex', codexRemove: 'Remover hooks do Codex',
     hooksRemove: 'Remover os hooks do Claude Code', quit: 'Sair',
   },
   ru: {
@@ -72,6 +76,7 @@ const TRAY = {
     soundsDir: 'Открыть папку своих звуков', screen: 'Экран', wander: 'Гулять, когда ничего не происходит',
     possess: 'Вселяться в мои окна', lang: 'Язык', auto: 'Автоматически (системный)', startup: 'Запускать вместе с Windows',
     hooksOn: 'Хуки Claude Code: установлены', hooksOff: 'Установить хуки Claude Code',
+    codexOn: 'Хуки Codex: установлены', codexOff: 'Установить хуки Codex', codexRemove: 'Удалить хуки Codex',
     hooksRemove: 'Удалить хуки Claude Code', quit: 'Выйти',
   },
 };
