@@ -392,3 +392,26 @@ See [testing instructions](CODEX_TEST_PLAN.md).
 
 The source code is MIT, but the original character artwork is **excluded** from that license.
 This is a personal, noncommercial experiment: the copyrighted art must not be relicensed.
+
+## Codex Desktop on Windows: read-only session monitor fallback
+
+The lifecycle hook toggle alone does not guarantee that Desktop will dispatch hooks
+or trust them; see upstream Codex reports [#21639](https://github.com/openai/codex/issues/21639)
+and [#47283](https://github.com/openai/codex/issues/47283).
+
+This fork offers a second **Watch Codex** checkbox independent from **Watch Claude Code**.
+When enabled, Capri also watches `%USERPROFILE%\\.codex\\sessions\\YYYY\\MM\\DD\\rollout-*.jsonl`
+(or `CODEX_HOME/sessions`) for **newly appended Codex Desktop activity**. It:
+- reads local files **read-only**, never changes Codex settings, files, prompts, or projects;
+- processes recent Desktop sessions, and does not replay history when Capri starts;
+- forwards only lifecycle **event names** and **tool names** to the local overlay, without
+  copying prompt text, shell commands, code, patch contents or response text;
+- suppresses duplicate updates if matching live Codex CLI hooks already work.
+
+The journal format is unofficial, so it may change with Codex updates. This mode currently
+supports prompt/start, basic tool activity, completion and interruption. It cannot guarantee
+permission prompts, full final answers, or every tool action. If the app itself does not
+create local journal files, the fallback won't see it.
+
+For testing, enable **Watch Codex** even when **Watch Claude Code** is off. Run a
+**new local** Desktop turn after Capri is already open. Remote/cloud tasks are not covered.

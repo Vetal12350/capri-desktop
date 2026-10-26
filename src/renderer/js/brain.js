@@ -28,7 +28,8 @@ export class Brain {
     this.onLinked = null;
     this.onShowcase = null; // the demo's second half (app.js)
     this.onTalk = null;     // opens a chat with her (app.js, chat.js)
-    this.watching = true;   // she follows Claude Code (her menu; off, she just keeps you company)
+    this.watching = true;   // follows Claude Code
+    this.watchingCodex = true; // follows local Codex separately
     this.thinkTimer = 0;
     this.thinking = null;   // { s, since, said, fidget, gazed } while Claude is quiet mid-task
   }
@@ -90,7 +91,8 @@ export class Brain {
   handle(evt) {
     // the demo's second half (scripts/demo-sequence.js), not a Claude event
     if (evt.hook_event_name === 'CapriShowcase') return this.onShowcase?.();
-    if (!this.watching && !evt.demo) return undefined; // not watching Claude Code: none of its business
+    if (!evt.demo && evt.provider === 'codex' && !this.watchingCodex) return undefined;
+    if (!evt.demo && evt.provider !== 'codex' && !this.watching) return undefined;
     // the first real Claude Code event that ever reaches her (the demo's don't count)
     if (!this.linked && !evt.demo) {
       this.linked = true;

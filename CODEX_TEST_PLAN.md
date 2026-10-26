@@ -21,3 +21,11 @@
 - Do not submit passwords, tokens, API keys, private patches or customer data to test hooks.
 - Review Windows SmartScreen and unsigned application warnings; don't bypass safeguards blindly.
 - Original character graphics are not covered by MIT source license.
+
+## Windows Desktop read-only fallback
+1. Disable Watch Claude Code, enable Watch Codex.
+2. Start Capri before a NEW local Codex Desktop task (not cloud).
+3. Confirm Capri reacts to prompt, tool activity and completion without CLI hooks.
+4. Verify no previous or unrelated sessions are replayed on launch.
+5. Confirm disabling Watch Codex stops reactions.
+6. Approval prompts are not guaranteed in journal fallback; do not assume they work.
